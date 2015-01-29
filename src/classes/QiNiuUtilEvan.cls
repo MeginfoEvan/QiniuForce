@@ -1,23 +1,19 @@
 public with sharing class QiNiuUtilEvan {
 
     
-    //FINAL STRING SECRETKEY = 'zUYHgWEqevP4uNwVKVDXux2NXW7PRI4Ijbs5rFXx';
-    //FINAL STRING ACCESSKEY = 'ivEa4_Lh31WM-9XeuwPA-i4EaRiBpNLipUL5TdAg';
-
-    FINAL STRING SECRETKEY = '6QTOr2Jg1gcZEWDQXKOGZh5PziC2MCV5KsntT70j';
-    FINAL STRING ACCESSKEY = 'iN7NgwM31j4-BZacMjPrOQBs34UG1maYCAQmhdCV';
+    FINAL STRING SECRETKEY = 'zUYHgWEqevP4uNwVKVDXux2NXW7PRI4Ijbs5rFXx';
+    FINAL STRING ACCESSKEY = 'ivEa4_Lh31WM-9XeuwPA-i4EaRiBpNLipUL5TdAg';
 
     String scope;
     Long deadline;
-    //String returnUrl = 'http://www.baidu.com';
-    //String returnBody = '{"name": $(fname),"size": $(fsize),"w": $(imageInfo.width),"h": $(imageInfo.height),"hash": $(etag)}';
+ 
     public QiNiuUtilEvan()
     {
         deadline = DateTime.now().addHours(1).getTime()/1000;
     }
     public String generateUploadToken(String fileName)
     {
-        scope = 'qiniuforce:' + fileName + '.png';
+        scope = 'qiniuforce:' + fileName;
         //PutPolicy putPolicy = new PutPolicy(SCOPE, deadline, returnUrl, returnBody);
         PutPolicy putPolicy = new PutPolicy(scope, deadline);
         String policyToJson = JSON.serialize(putPolicy);
@@ -41,21 +37,27 @@ public with sharing class QiNiuUtilEvan {
     public void uploadFile()
     {
         FeedItem feed = getFile();
-        String token = generateUploadToken(feed.ContentFileName);
-        String frontier = '--<splite>';
+        String token = 'ivEa4_Lh31WM-9XeuwPA-i4EaRiBpNLipUL5TdAg:DOFHegh7TBUzHxMKM1I4fcrlHb8=:eyJzY29wZSI6InFpbml1Zm9yY2UiLCJkZWFkbGluZSI6MTQyMjUyMzE3MX0=';
+        //String token = generateUploadToken(feed.ContentFileName);
+        String boundary = '-----<s1312314124>';
+        String frontier = '--' + boundary;
         String fileName = feed.ContentFileName;
+        System.debug('&&&&&&&&&&&&&&&&'+fileName+'&&&&&&&&&&&&&&&');
         String fileBody = EncodingUtil.base64Encode(feed.ContentData);
-        String bodyText = frontier + '\n' + 
-        'Content-Disposition: form-data; name="token"' + '\n' +  token  + '\n' + frontier + '\n' +
-        'Content-Disposition: form-data; name="file"; fileName=' + fileName  +'\n' + 
-        'Content-Type: application/octet-stream' + '\n' + 'Content-Transfer-Encoding: binary' + '\n' + fileBody  + '\n' + frontier + '--';
+        String bodyText = frontier + '\r\n' + 
+        'Content-Disposition: form-data; name="token"' + '\r\n' + '\r\n' +  token  + '\r\n' + frontier + '\r\n' +
+        'Content-Disposition: form-data; name="key"' + '\r\n' + '\r\n' + 'fileName' + '\r\n' + frontier + '\r\n' +
+        'Content-Disposition: form-data; name="x:username"' + '\r\n' + '\r\n' + '\r\n' +
+        'Content-Disposition: form-data; name="file"; fileName=' + '"' + fileName + '"' +'\r\n' + 
+        'Content-Type: application/octet-stream' + '\r\n' + 'Content-Transfer-Encoding: binary' + '\r\n' + '\r\n' + '*************' + '\r\n' + frontier + '--';
         HttpRequest req = new HttpRequest();
         req.setEndpoint('http://upload.qiniu.com');
         req.setMethod('POST');
         req.setHeader('Host','upload.qiniu.com');
-        req.setHeader('Content-Type','multipart/form-data; boundary=<splite>');
+        req.setHeader('Content-Type','multipart/form-data; boundary=' + boundary);
         req.setHeader('Content-Length',String.valueof(bodyText.length()));
         req.setBody(bodyText);
+        System.debug('request body:' + '\r\n' + bodyText);
 
         HttpResponse res = new HttpResponse();
         Http http = new Http();
@@ -72,7 +74,6 @@ public with sharing class QiNiuUtilEvan {
             if(item.ContentSize > 0)
             {
                 feed = item;
-                break;
             }
         }
         return feed;

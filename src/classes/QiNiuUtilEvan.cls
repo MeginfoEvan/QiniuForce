@@ -28,9 +28,9 @@ public with sharing class QiNiuUtilEvan {
         return uploadToken;
     }
 
-    public void uploadFile()
+    public void uploadFile(FeedItem feed)
     {
-        FeedItem feed = getFile();
+        //FeedItem feed = getFile();
         String key = feed.ContentFileName.split('.',1)[0];
         String token = generateUploadToken(key);
         String boundary = '-----s1312314124';
@@ -61,18 +61,25 @@ public with sharing class QiNiuUtilEvan {
         System.debug(res.getBody());
     }
 
-    public FeedItem getFile()
+    public void uploadAllFile()
     {
-        FeedItem feed = new FeedItem();
-        List<FeedItem> feedItems = [select Id, Body, ContentData, ContentSize, ContentFileName from FeedItem limit 1000];
-        for(FeedItem item : feedItems)
+        for(FeedItem feed : getAllFile())
         {
-            if(item.ContentSize > 0)
+           uploadFile(feed);
+        }
+    }
+
+    public List<FeedItem> getAllFile()
+    {
+        List<FeedItem> feedItems = new List<FeedItem>();
+        for(FeedItem feed : [select Id, Body, ContentData, ContentSize, ContentFileName from FeedItem limit 1000])
+        {
+            if(feed.ContentSize > 20480)
             {
-                feed = item;
+                feedItems.add(feed);
             }
         }
-        return feed;
+        return feedItems;
     }
 
     //class PutPolicy

@@ -1,249 +1,172 @@
 public with sharing class QiNiuUtil {
-    FINAL STRING SCOPE = 'testgeorge';
     FINAL STRING SECRETKEY = 'm2FkS57nIlsCH-oPTs5fx-hxrBJXinCc86xsnzPK';
     FINAL STRING ACCESSKEY = 'LcLorpL24SH1XF0_wAbrwZG5IDiLDlojn2FX0Bn-';
-
-    //FINAL STRING SCOPE = 'testuploadqiniuspace:testImg1.jpg';
-    //FINAL STRING SECRETKEY = '6QTOr2Jg1gcZEWDQXKOGZh5PziC2MCV5KsntT70j';
-    //FINAL STRING ACCESSKEY = 'iN7NgwM31j4-BZacMjPrOQBs34UG1maYCAQmhdCV';
-
+    String scope;
     Long deadline;
-    //String returnUrl = 'http://www.baidu.com';
-    //String returnBody = '{"name": $(fname),"size": $(fsize),"w": $(imageInfo.width),"h": $(imageInfo.height),"hash": $(etag)}';
-    
-    public QiNiuUtil() {}
-
-    public String generateToken()
+    Integer limitImagSize;
+   
+    public QiNiuUtil()
     {
+        scope = 'testgeorge';
         deadline = DateTime.now().addHours(1).getTime()/1000;
-        //deadline = 1422248583;
-        System.debug('################deadline' + deadline);
-        PutPolicy putPolicy = new PutPolicy(SCOPE, deadline);
+        limitImagSize = 20480;
+    }
+/**--------------------------------upload-------------------------------------------------**/
+    public String generateUploadToken(String key)
+    {
+        scope = scope + ':' + key;
+        PutPolicy putPolicy = new PutPolicy(scope, deadline);
         String policyToJson = JSON.serialize(putPolicy);
-                System.debug('********1.policyToJson:' + policyToJson + '**********');
+        System.debug('*************'+policyToJson+'*************');
         String encodedPolicy = EncodingUtil.base64Encode(Blob.valueOf(policyToJson));
-                System.debug('********2.encodedPolicy:' + encodedPolicy + '**********');
+        System.debug('*************'+encodedPolicy+'*************');
         Blob sign = crypto.generateMac('hmacSHA1', Blob.valueOf(encodedPolicy), Blob.valueOf(SECRETKEY));
-                System.debug('********3.sign:' + sign + '**********');
         String encodedSign = EncodingUtil.base64Encode(sign);
-                System.debug('********4.encodedSign:' + encodedSign + '**********');
-
-        //String encodedSign = testEncodedHMAC(encodedPolicy, SECRETKEY);
-        System.debug('********4.encodedSign:' + encodedSign + '**********');
-        String uploadToken = ACCESSKEY + ':' + encodedSign + ':' + encodedPolicy;
-                System.debug('********5.uploadToken:' + uploadToken + '**********');
+        System.debug('*************'+encodedSign+'*************');
+        String uploadToken = ACCESSKEY + ':' + encodedSign.replace('/', '_').replace('+','-') + ':' + encodedPolicy;
         return uploadToken;
     }
 
-    public String getDownloadToken(String myBucket, String myFileNa)
+    public void uploadFile(FeedItem feed)
     {
-        deadline = DateTime.now().addHours(1).getTime()/1000;
-        String downloadUrl = 'http://' + myBucket + '.qiniudn.com/' + myFileNa;
-        downloadUrl += '?e=' + deadline;
+        String key = feed.ContentFileName;
+        String token = generateUploadToken(key);
+        String boundary = '-----s1312314124';
+        String frontier = '--' + boundary;
+        String fileName = feed.ContentFileName;
+        System.debug('&&&&&&&&&&&&&&&&'+ fileName + '&&&&&&&&&&&&&&&&'+key+'&&&&&&&&&&&&&&&');
+        String fileBody = EncodingUtil.base64Encode(feed.ContentData);
+        String bodyText = frontier + '\r\n' + 
+        'Content-Disposition: form-data; name="token"' + '\r\n' + '\r\n' + token + '\r\n' + frontier + '\r\n' +
+        'Content-Disposition: form-data; name="key"' + '\r\n' + '\r\n' + key + '\r\n' + frontier + '\r\n' +
+        'Content-Disposition: form-data; name="x:username"' + '\r\n' + '\r\n' + '\r\n' +  frontier + '\r\n' +
+        'Content-Disposition: form-data; name="file"; fileName=' + '"' + fileName + '"' +'\r\n' + 
+        'Content-Type: application/octet-stream' + '\r\n' + 'Content-Transfer-Encoding: binary' + '\r\n' + '\r\n' + fileBody + '\r\n' + frontier + '--';
+        HttpRequest req = new HttpRequest();
+        req.setEndpoint('http://upload.qiniu.com');
+        req.setMethod('POST');
+        req.setHeader('Host','upload.qiniu.com');
+        req.setHeader('Content-Type','multipart/form-data; boundary=' + boundary);
+        req.setHeader('Content-Length',String.valueof(bodyText.length()+feed.ContentSize));
+        req.setBody(bodyText);
+        System.debug('request Content-Type:' + req.getHeader('Content-Type'));
+        System.debug('request Content-Length:' + req.getHeader('Content-Length'));
+        System.debug('request Body:' + '\r\n' + bodyText);
 
-        Blob sign = Crypto.generateMac('hmacSHA1', Blob.valueOf(downloadUrl), Blob.valueOf(SECRETKEY));
-        String encodedSign = EncodingUtil.base64Encode(sign);
-
-        String token = encodedSign + ':' + ACCESSKEY;
-
-        String realDownloadUrl = downloadUrl + '&token=' + token;
-        return realDownloadUrl;
+        HttpResponse res = new HttpResponse();
+        Http http = new Http();
+        res = http.send(req);
+        System.debug(res.getBody());
     }
 
-    public String getDownloadToken(String myFileName)
+     public void uploadAllFile()
     {
-        deadline = DateTime.now().addHours(1).getTime()/1000;
-        String myFile = EncodingUtil.urlEncode(myFileName, 'UTF-8');
-        String downloadUrl = 'http://7u2r2z.com1.z0.glb.clouddn.com/' + myFile;
-        downloadUrl += '?e=' + deadline;
+        for(FeedItem feed : getAllFile())
+        {
+           uploadFile(feed);
+        }
+    }
 
+     public List<FeedItem> getAllFile()
+    {
+        List<FeedItem> feedItems = new List<FeedItem>();
+        for(FeedItem feed : [select Id, Body, ContentData, ContentSize, ContentFileName from FeedItem limit 1000])
+        {
+            if(feed.ContentSize > limitImagSize)
+            {
+                feedItems.add(feed);
+            }
+        }
+        return feedItems;
+    }
+
+/**--------------------------------DownLoad-------------------------------------------------**/
+
+    /**Send Get Request to download some file**/
+    public Blob getImageBlob(Boolean IsSelf, String fileName, String domain)
+    {
+        Http h = new Http();
+        HttpRequest req = new HttpRequest();
+        req.setMethod('GET');
+        //set height and width for image
+        String operation = getOperation('100', '100'); 
+
+        if(IsSelf)
+        {
+            //Set HTTPRequest Endpoint
+            req.setEndpoint(getRealDownLoadUrlWithTokenCompress(fileName, domain, operation));
+        }
+        else
+        {
+            req.setEndpoint('http://' + domain + '/george');
+        }
+
+        HttpResponse res = new HttpResponse();
+        try
+        {
+            res = h.send(req);
+            List<String> headers = res.getHeaderKeys();
+            for(String a : headers)
+            {
+                System.debug('KeyStart');
+                System.debug( a + ': ' + res.getHeader(a));
+            }
+            System.debug(res.getStatusCode());
+        }
+        catch(Exception ex)
+        {
+
+        }
+        return res.getBodyAsBlob();
+    }
+
+    public String getRealDownloadUrlWithTokenFull(String myFileName, String domain)
+    {
+        //String myFile = EncodingUtil.urlEncode(myFileName, 'UTF-8');
+        String downloadUrl = 'http://' + domain + '/' + myFileName;
+        downloadUrl += '?e=' + deadline;
         Blob sign = Crypto.generateMac('hmacSHA1', Blob.valueOf(downloadUrl), Blob.valueOf(SECRETKEY));
         String encodedSign = EncodingUtil.base64Encode(sign);
-
+        
+        encodedSign = encodedSign.replace('/', '_').replace('+', '-');
+        
         String token = ACCESSKEY + ':' + encodedSign;
-
         //downloadUrl = 'http://7u2r2z.com1.z0.glb.clouddn.com/' + myFile + '?e=' + deadline;
         String realDownloadUrl = downloadUrl + '&token=' + token;
         return realDownloadUrl;
     }
 
-    public String testEncodedHMAC(String policy, String hashKey)
+    public String getRealDownLoadUrlWithTokenCompress(String myFileName, String domain, String operation)
     {
-        //String policy = 'eyJzY29wZSI6Im15LWJ1Y2tldDpzdW5mbG93ZXIuanBnIiwiZGVhZGxpbmUiOjE0NTE0OTEyMDAsInJldHVybkJvZHkiOiJ7XCJuYW1lXCI6JChmbmFtZSksXCJzaXplXCI6JChmc2l6ZSksXCJ3XCI6JChpbWFnZUluZm8ud2lkdGgpLFwiaFwiOiQoaW1hZ2VJbmZvLmhlaWdodCksXCJoYXNoXCI6JChldGFnKX0ifQ==';
-        //String hashKey = 'MY_SECRET_KEY';
-        Blob s = crypto.generateMac('hmacSHA1', Blob.valueOf(policy), Blob.valueOf(hashKey));
-        String encodedSign = EncodingUtil.base64Encode(s);
-        return encodedSign;
+        //String myFile = EncodingUtil.urlEncode(myFileName, 'UTF-8');
+        String downloadUrl = 'http://' + domain + '/' + myFileName;
+        downloadUrl += '?' + operation + '&e=' + deadline;
+        Blob sign = Crypto.generateMac('hmacSHA1', Blob.valueOf(downloadUrl), Blob.valueOf(SECRETKEY));
+        String encodedSign = EncodingUtil.base64Encode(sign);
+        
+        encodedSign = encodedSign.replace('/', '_').replace('+', '-');
+        
+        String token = ACCESSKEY + ':' + encodedSign;
+        //downloadUrl = 'http://7u2r2z.com1.z0.glb.clouddn.com/' + myFile + '?e=' + deadline;
+        String realDownloadUrl = downloadUrl + '&token=' + token;
+        return realDownloadUrl;
+    }
+
+    public static String getOperation(String height, String width)
+    {
+        //'imageView/2/h/100'
+        String operation = 'imageView/2/h/' + height + '/w/' + width;
+        return operation; 
     }
 
     class PutPolicy
     {
         String scope;
         Long deadline;
-        //String returnUrl;
-        //String returnBody;
         PutPolicy(String scope, Long deadline)
         {
             this.scope = scope;
             this.deadline = deadline;
-            //this.returnUrl = returnUrl;
-            //this.returnBody = returnBody;
-        }  
-    }
-
-    public String FileName { get; set; }
-    public String Body 
-    {
-        get
-        {
-            Blob b = getImg();
-            return getRequestBody(true, b);
-        }
-        set;
-    }
-    public String DownBody 
-    {
-        get
-        {
-            return null;
-        }
-        set;
-    }
-  
-    public String getRequestBody(Boolean IsOnly, Blob fileBody)
-    {
-        String requestBody;
-        if(IsOnly)
-        {
-            String frontier = 'akb48ljj1233613faslfnsefnalfefjslf';
-            requestBody = '--' + frontier + '\n';
-            requestBody += 'Content-Disposition: form-data; name=\"token\"\n';
-            requestBody += generateToken() + '\n';
-            requestBody += '--' + frontier + '\n';
-            requestBody += 'Content-Disposition: form-data; name=\"key\"\n';
-            requestBody += 'georgeFile\n';
-            requestBody += '--' + frontier + '\n';
-            requestBody += 'Content-Disposition: form-data; name=\"file\"; filename=\"testImg1\"\n';
-            requestBody += 'Content-Type: application/octet-stream\n';
-            requestBody += 'Content-Transfer-Encoding: binary\n';
-
-            //add File Detail
-            String fileDetail = EncodingUtil.base64Encode(fileBody);
-            requestBody += fileDetail + '\r\n';
-            requestBody += '--' + frontier + '--';
-            System.debug(requestBody);
-        }
-        return requestBody;
-    }
-    
-    public static Blob getImg()
-    {
-        List<FeedItem> feedItems = [select Id, Body, ContentData, ContentSize, ContentFileName from FeedItem ];
-        Blob img;
-        for(FeedItem item : feedItems)
-        {
-            if(item.ContentSize > 0)
-            {
-                System.debug('%%%%%' + item.ContentData);
-                img = item.ContentData;
-                break;
-            }
-        }
-        System.debug('%%%%%');
-        System.debug(img == null);
-        return img;
-    }
-
-    public String sendRequest()
-    {
-        Http h = new Http();
-        HttpRequest req = new HttpRequest();
-        //Set HTTPRequest Method
-        req.setMethod('POST');
-        //Set HTTPRequest header properties
-        req.setEndpoint('http://up.qiniu.com');
-        req.setHeader('Host','upload.qiniu.com');
-        req.setHeader('content-type', 'multipart/form-data; boundary=<123456>');
-        
-        System.debug('caonima');
-        
-        req.setBody(Body);
-        req.setHeader('Content-Length', '70000');
-        HttpResponse res = new HttpResponse();
-        try
-        {
-            res = h.send(req);
-            System.debug('%%%%%%Status' + res.getStatusCode());
-        }
-        catch(Exception ex)
-        {
-
-        }
-        System.debug('%%%%%%' + res.getBody());
-        return res.getBody();
-    }
-
-    //Send Get Request to get some file
-    public String sendGetRequest(Boolean IsSelf)
-    {
-        Http h = new Http();
-        HttpRequest req = new HttpRequest();
-        req.setMethod('GET');
-
-        if(IsSelf)
-        {
-            //Set HTTPRequest Method
-            System.debug('IsSelf%%%%%%%%');
-            req.setEndpoint(getDownloadToken('testImg1.png'));
-        }
-        else
-        {
-            System.debug('NotIsSelf%%%%%%%%');
-            req.setEndpoint('http://7u2noj.com1.z0.glb.clouddn.com/george');
-        }
-
-        HttpResponse res = new HttpResponse();
-        try
-        {
-            res = h.send(req);
-            System.debug('$$$$$%%%%%' + res.getStatusCode());
-            //System.debug('$$$$$%%%%%' + res.getBody());
-        }
-        catch(Exception ex)
-        {
-
-        }
-        return res.getBody();
-    }
-
-    public static void testSend()
-    {
-        QiniuUtil q = new QiniuUtil();
-        String a = q.sendRequest();
-        System.debug(a != null);
-    }
-
-    public static void testSendGet()
-    {
-        QiniuUtil q = new QiniuUtil();
-        String a = q.sendGetRequest(true);
-        System.debug('%%%%%%' + a);
-    }
-
-    public static void testSendNotSelf()
-    {
-        QiniuUtil q = new QiniuUtil();
-        String a = q.sendGetRequest(false);
-        System.debug('$$$$$$' + a);
-        Blob img = Blob.valueOf(a);
-    }
-
-    public String Data{ get; set; }
-
-    public PageReference testShow()
-    {
-        QiniuUtil q = new QiniuUtil();
-        Data = EncodingUtil.base64Encode(Blob.valueOf(q.sendGetRequest(false)));
-        return null;
-    }
+        } 
+    } 
 }
